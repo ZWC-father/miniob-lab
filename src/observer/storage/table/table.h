@@ -118,6 +118,7 @@ public:
   const TableMeta &table_meta() const;
 
   LobFileHandler *lob_handler() const { return lob_handler_; }
+  RC read_vector(const char *field_data, int max_length, Value &value) const;
 
   RC sync();
 

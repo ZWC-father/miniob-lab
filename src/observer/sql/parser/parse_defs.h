@@ -60,10 +60,12 @@ enum CompOp
  * @details 条件比较就是SQL查询中的 where a>b 这种。
  * 一个条件比较是有两部分组成的，称为左边和右边。
  * 左边和右边理论上都可以是任意的数据，比如是字段（属性，列），也可以是数值常量。
- * 这个结构中记录的仅仅支持字段和值。
+ * 字段和值沿用原有表示；向量函数等表达式由 shared_ptr 持有，允许条件节点复制。
  */
 struct ConditionSqlNode
 {
+  std::shared_ptr<Expression> left_expression;
+  std::shared_ptr<Expression> right_expression;
   int left_is_attr;              ///< TRUE if left-hand side is an attribute
                                  ///< 1时，操作符左边是属性名，0时，是属性值
   Value          left_value;     ///< left-hand side value if left_is_attr = FALSE

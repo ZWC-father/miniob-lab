@@ -30,7 +30,17 @@ RC SqlResult::open()
 
   Trx *trx = session_->current_trx();
   trx->start_if_need();
-  return operator_->open(trx);
+  RC rc = operator_->open(trx);
+  if (OB_FAIL(rc) || !vector_result_) return rc;
+  vector_rows_.clear();
+  vector_row_position_ = 0;
+  while ((rc = operator_->next()) == RC::SUCCESS) {
+    ValueListTuple row;
+    rc = ValueListTuple::make(*operator_->current_tuple(), row);
+    if (OB_FAIL(rc)) return rc;
+    vector_rows_.emplace_back(std::move(row));
+  }
+  return rc == RC::RECORD_EOF ? RC::SUCCESS : rc;
 }
 
 RC SqlResult::close()
@@ -61,6 +71,11 @@ RC SqlResult::close()
 
 RC SqlResult::next_tuple(Tuple *&tuple)
 {
+  if (vector_result_) {
+    if (vector_row_position_ == vector_rows_.size()) return RC::RECORD_EOF;
+    tuple = &vector_rows_[vector_row_position_++];
+    return RC::SUCCESS;
+  }
   RC rc = operator_->next();
   if (rc != RC::SUCCESS) {
     return rc;

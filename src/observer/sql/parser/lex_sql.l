@@ -126,6 +126,7 @@ ANALYZE                                 RETURN_TOKEN(ANALYZE);
 FIELDS                                  RETURN_TOKEN(FIELDS);
 TERMINATED                              RETURN_TOKEN(TERMINATED);
 ENCLOSED                                RETURN_TOKEN(ENCLOSED);
+STRING_TO_VECTOR|TO_VECTOR|VECTOR_TO_STRING|FROM_VECTOR|DISTANCE|VECTOR_DISTANCE|L2_DISTANCE|COSINE_DISTANCE|INNER_PRODUCT { yylval->cstring=strdup(yytext); static_cast<std::vector<char*>*>(yyextra)->push_back(yylval->cstring); RETURN_TOKEN(VECTOR_FUNC); }
 {ID}                                    yylval->cstring=strdup(yytext); static_cast<std::vector<char*>*>(yyextra)->push_back(yylval->cstring); RETURN_TOKEN(ID);
 "("                                     RETURN_TOKEN(LBRACE);
 ")"                                     RETURN_TOKEN(RBRACE);

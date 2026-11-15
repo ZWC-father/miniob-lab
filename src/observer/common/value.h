@@ -119,6 +119,9 @@ public:
   void set_string(const char *s, int len = 0);
   void set_empty_string(int len);
   void set_string_from_other(const Value &other);
+  void set_vector(const float *values, int dimension);
+  int vector_dimension() const { return attr_type_ == AttrType::VECTORS ? length_ / sizeof(float) : 0; }
+  float vector_at(int index) const;
 
 private:
   AttrType attr_type_ = AttrType::UNDEFINED;
@@ -132,6 +135,6 @@ private:
     char   *pointer_value_;
   } value_ = {.int_value_ = 0};
 
-  /// 是否申请并占有内存, 目前对于 CHARS 类型 own_data_ 为true, 其余类型 own_data_ 为false
+  /// 是否申请并占有内存, CHARS 与 VECTORS 类型拥有动态数据
   bool own_data_ = false;
 };

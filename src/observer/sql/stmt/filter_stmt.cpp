@@ -13,6 +13,7 @@ See the Mulan PSL v2 for more details. */
 //
 
 #include "sql/stmt/filter_stmt.h"
+#include "sql/parser/expression_binder.h"
 #include "common/lang/string.h"
 #include "common/log/log.h"
 #include "common/sys/rc.h"
@@ -39,6 +40,7 @@ RC FilterStmt::create(Db *db, Table *default_table, unordered_map<string, Table 
 
     rc = create_filter_unit(db, default_table, tables, conditions[i], filter_unit);
     if (rc != RC::SUCCESS) {
+      delete filter_unit;
       delete tmp_stmt;
       LOG_WARN("failed to create filter unit. condition index=%d", i);
       return rc;
@@ -91,7 +93,29 @@ RC FilterStmt::create_filter_unit(Db *db, Table *default_table, unordered_map<st
 
   filter_unit = new FilterUnit;
 
-  if (condition.left_is_attr) {
+  BinderContext context;
+  if (tables) {
+    for (auto &[name, table] : *tables) context.add_table(table);
+  } else if (default_table) {
+    context.add_table(default_table);
+  }
+  ExpressionBinder binder(context);
+  auto bind_function = [&](const std::shared_ptr<Expression> &source, unique_ptr<Expression> &target) {
+    auto expression = source->copy();
+    vector<unique_ptr<Expression>> bound;
+    RC result = binder.bind_expression(expression, bound);
+    if (OB_FAIL(result)) return result;
+    if (bound.size() != 1) return RC::INVALID_ARGUMENT;
+    target = std::move(bound[0]);
+    Value constant;
+    if (target->try_get_value(constant) == RC::SUCCESS) target = make_unique<ValueExpr>(constant);
+    return RC::SUCCESS;
+  };
+
+  if (condition.left_expression) {
+    rc = bind_function(condition.left_expression, filter_unit->left_expression);
+    if (OB_FAIL(rc)) return rc;
+  } else if (condition.left_is_attr) {
     Table           *table = nullptr;
     const FieldMeta *field = nullptr;
     rc                     = get_table_and_field(db, default_table, tables, condition.left_attr, table, field);
@@ -108,7 +132,10 @@ RC FilterStmt::create_filter_unit(Db *db, Table *default_table, unordered_map<st
     filter_unit->set_left(filter_obj);
   }
 
-  if (condition.right_is_attr) {
+  if (condition.right_expression) {
+    rc = bind_function(condition.right_expression, filter_unit->right_expression);
+    if (OB_FAIL(rc)) return rc;
+  } else if (condition.right_is_attr) {
     Table           *table = nullptr;
     const FieldMeta *field = nullptr;
     rc                     = get_table_and_field(db, default_table, tables, condition.right_attr, table, field);
@@ -127,6 +154,12 @@ RC FilterStmt::create_filter_unit(Db *db, Table *default_table, unordered_map<st
 
   filter_unit->set_comp(comp);
 
-  // 检查两个类型是否能够比较
+  auto operand_type = [](const unique_ptr<Expression> &expression, const FilterObj &object) {
+    return expression ? expression->value_type() : object.is_attr ? object.field.attr_type() : object.value.attr_type();
+  };
+  AttrType left_type = operand_type(filter_unit->left_expression, filter_unit->left());
+  AttrType right_type = operand_type(filter_unit->right_expression, filter_unit->right());
+  if ((left_type == AttrType::VECTORS || right_type == AttrType::VECTORS) &&
+      (left_type != right_type || (comp != EQUAL_TO && comp != NOT_EQUAL))) return RC::INVALID_ARGUMENT;
   return rc;
 }

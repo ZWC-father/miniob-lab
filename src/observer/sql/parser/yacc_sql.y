@@ -11,6 +11,8 @@
 #include "sql/parser/yacc_sql.hpp"
 #include "sql/parser/lex_sql.h"
 #include "sql/expr/expression.h"
+#include "sql/expr/vector_function_expr.h"
+#include "common/type/vector_type.h"
 
 using namespace std;
 
@@ -155,6 +157,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %token <floats> FLOAT
 %token <cstring> ID
 %token <cstring> SSS
+%token <cstring> VECTOR_FUNC
 //非终结符
 
 /** type 定义了各种解析后的结果输出的是什么类型。类型对应了 union 中的定义的成员变量名称 **/
@@ -176,6 +179,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <relation_list>       rel_list
 %type <expression>          expression
 %type <expression>          aggregate_expression
+%type <expression>          vector_function
 %type <expression_list>     expression_list
 %type <expression_list>     group_by
 %type <cstring>             fields_terminated_by
@@ -364,13 +368,21 @@ attr_def:
       $$->type = (AttrType)$2;
       $$->name = $1;
       $$->length = $4;
+      if ($$->type == AttrType::VECTORS) {
+        if ($4 <= 0 || strtoull(token_name(sql_string, &@4).c_str(), nullptr, 10) > VectorType::MAX_DIMENSION) {
+          delete $$;
+          yyerror(&@4, sql_string, sql_result, scanner, "invalid vector dimension");
+          YYERROR;
+        }
+        $$->length *= sizeof(float);
+      }
     }
     | ID type
     {
       $$ = new AttrInfoSqlNode;
       $$->type = (AttrType)$2;
       $$->name = $1;
-      $$->length = 4;
+      $$->length = $$->type == AttrType::VECTORS ? VectorType::DEFAULT_DIMENSION * sizeof(float) : 4;
     }
     ;
 number:
@@ -420,18 +432,32 @@ insert_stmt:        /*insert   语句的语法解析树*/
     ;
 
 value_list:
-    value
+    expression
     {
-      $$ = new vector<Value>;
-      $$->emplace_back(*$1);
+      Value value;
+      RC rc = $1->try_get_value(value);
       delete $1;
+      if (OB_FAIL(rc)) {
+        yyerror(&@1, sql_string, sql_result, scanner, "invalid insert value");
+        YYERROR;
+      }
+      $$ = new vector<Value>;
+      $$->emplace_back(std::move(value));
     }
-    | value_list COMMA value { 
-      $$ = $1;
-      $$->emplace_back(*$3);
+    | value_list COMMA expression {
+      Value value;
+      RC rc = $3->try_get_value(value);
       delete $3;
+      if (OB_FAIL(rc)) {
+        delete $1;
+        yyerror(&@3, sql_string, sql_result, scanner, "invalid insert value");
+        YYERROR;
+      }
+      $$ = $1;
+      $$->emplace_back(std::move(value));
     }
     ;
+
 value:
     NUMBER {
       $$ = new Value((int)$1);
@@ -483,7 +509,13 @@ update_stmt:      /*  update 语句的语法解析树*/
     }
     ;
 select_stmt:        /*  select 语句的语法解析树*/
-    SELECT expression_list FROM rel_list where group_by
+    SELECT expression_list
+    {
+      $$ = new ParsedSqlNode(SCF_CALC);
+      $$->calc.expressions.swap(*$2);
+      delete $2;
+    }
+    | SELECT expression_list FROM rel_list where group_by
     {
       $$ = new ParsedSqlNode(SCF_SELECT);
       if ($2 != nullptr) {
@@ -566,8 +598,17 @@ expression:
       $$->set_name(token_name(sql_string, &@$));
       delete $1;
     }
+    | vector_function { $$ = $1; }
     | aggregate_expression {
       $$ = $1;
+    }
+    ;
+
+vector_function:
+    VECTOR_FUNC LBRACE expression_list RBRACE {
+      $$ = new VectorFunctionExpr($1, std::move(*$3));
+      $$->set_name(token_name(sql_string, &@$));
+      delete $3;
     }
     ;
 
@@ -636,53 +677,29 @@ condition_list:
     }
     ;
 condition:
-    rel_attr comp_op value
+    expression comp_op expression
     {
       $$ = new ConditionSqlNode;
-      $$->left_is_attr = 1;
-      $$->left_attr = *$1;
-      $$->right_is_attr = 0;
-      $$->right_value = *$3;
       $$->comp = $2;
-
-      delete $1;
-      delete $3;
-    }
-    | value comp_op value 
-    {
-      $$ = new ConditionSqlNode;
-      $$->left_is_attr = 0;
-      $$->left_value = *$1;
-      $$->right_is_attr = 0;
-      $$->right_value = *$3;
-      $$->comp = $2;
-
-      delete $1;
-      delete $3;
-    }
-    | rel_attr comp_op rel_attr
-    {
-      $$ = new ConditionSqlNode;
-      $$->left_is_attr = 1;
-      $$->left_attr = *$1;
-      $$->right_is_attr = 1;
-      $$->right_attr = *$3;
-      $$->comp = $2;
-
-      delete $1;
-      delete $3;
-    }
-    | value comp_op rel_attr
-    {
-      $$ = new ConditionSqlNode;
-      $$->left_is_attr = 0;
-      $$->left_value = *$1;
-      $$->right_is_attr = 1;
-      $$->right_attr = *$3;
-      $$->comp = $2;
-
-      delete $1;
-      delete $3;
+      auto set_operand = [](Expression *expr, int &is_attr, RelAttrSqlNode &attr,
+                            Value &value, std::shared_ptr<Expression> &function) {
+        if (expr->type() == ExprType::UNBOUND_FIELD) {
+          auto &field = static_cast<UnboundFieldExpr &>(*expr);
+          is_attr = 1;
+          attr.relation_name = field.table_name();
+          attr.attribute_name = field.field_name();
+          delete expr;
+        } else if (expr->type() == ExprType::VALUE) {
+          is_attr = 0;
+          static_cast<ValueExpr &>(*expr).get_value(value);
+          delete expr;
+        } else {
+          is_attr = 0;
+          function.reset(expr);
+        }
+      };
+      set_operand($1, $$->left_is_attr, $$->left_attr, $$->left_value, $$->left_expression);
+      set_operand($3, $$->right_is_attr, $$->right_attr, $$->right_value, $$->right_expression);
     }
     ;
 

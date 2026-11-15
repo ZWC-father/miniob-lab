@@ -34,8 +34,15 @@ public:
 
   RC insert_data(int64_t &offset, int64_t length, const char *data);
 
-  RC get_data(int64_t offset, int64_t length, char *data) { return file_.read_at(offset, length, data); }
+  RC get_data(int64_t offset, int64_t length, char *data)
+  {
+    std::lock_guard<std::mutex> guard(mutex_);
+    int64_t read_size = 0;
+    RC rc = file_.read_at(offset, length, data, &read_size);
+    return OB_FAIL(rc) ? rc : read_size == length ? RC::SUCCESS : RC::IOERR_READ;
+  }
 
 private:
   PersistHandler file_;
+  std::mutex mutex_;
 };

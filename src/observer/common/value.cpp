@@ -33,6 +33,10 @@ Value::Value(const string_t& s) { set_string(s.data(), s.size()); }
 
 Value::Value(const Value &other)
 {
+  if (other.attr_type_ == AttrType::VECTORS) {
+    set_vector(reinterpret_cast<const float *>(other.data()), other.vector_dimension());
+    return;
+  }
   this->attr_type_ = other.attr_type_;
   this->length_    = other.length_;
   this->own_data_  = other.own_data_;
@@ -60,6 +64,10 @@ Value::Value(Value &&other)
 Value &Value::operator=(const Value &other)
 {
   if (this == &other) {
+    return *this;
+  }
+  if (other.attr_type_ == AttrType::VECTORS) {
+    set_vector(reinterpret_cast<const float *>(other.data()), other.vector_dimension());
     return *this;
   }
   reset();
@@ -97,6 +105,7 @@ void Value::reset()
 {
   switch (attr_type_) {
     case AttrType::CHARS:
+    case AttrType::VECTORS:
       if (own_data_ && value_.pointer_value_ != nullptr) {
         delete[] value_.pointer_value_;
         value_.pointer_value_ = nullptr;
@@ -113,6 +122,9 @@ void Value::reset()
 void Value::set_data(char *data, int length)
 {
   switch (attr_type_) {
+    case AttrType::VECTORS: {
+      set_vector(reinterpret_cast<const float *>(data), length / sizeof(float));
+    } break;
     case AttrType::CHARS: {
       set_string(data, length);
     } break;
@@ -193,7 +205,13 @@ void Value::set_empty_string(int len)
 
 void Value::set_value(const Value &value)
 {
+  if (this == &value) {
+    return;
+  }
   switch (value.attr_type_) {
+    case AttrType::VECTORS: {
+      set_vector(reinterpret_cast<const float *>(value.data()), value.vector_dimension());
+    } break;
     case AttrType::INTS: {
       set_int(value.get_int());
     } break;
@@ -225,6 +243,7 @@ void Value::set_string_from_other(const Value &other)
 char *Value::data() const
 {
   switch (attr_type_) {
+    case AttrType::VECTORS:
     case AttrType::CHARS: {
       return value_.pointer_value_;
     } break;
@@ -348,4 +367,23 @@ bool Value::get_boolean() const
     }
   }
   return false;
+}
+
+void Value::set_vector(const float *values, int dimension)
+{
+  const int bytes = dimension * sizeof(float);
+  char *copy = new char[bytes];
+  memcpy(copy, values, bytes);
+  reset();
+  attr_type_ = AttrType::VECTORS;
+  length_ = bytes;
+  own_data_ = true;
+  value_.pointer_value_ = copy;
+}
+
+float Value::vector_at(int index) const
+{
+  float value;
+  memcpy(&value, data() + index * sizeof(float), sizeof(value));
+  return value;
 }

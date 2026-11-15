@@ -106,6 +106,16 @@ RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, c
     return rc;
   }
 
+  for (const FieldMeta &field : *table_meta_.field_metas()) {
+    if (field.type() == AttrType::VECTORS) {
+      lob_handler_ = new LobFileHandler;
+      string lob_file = table_data_file(base_dir, name) + ".vector";
+      rc = lob_handler_->create_file(lob_file.c_str());
+      if (OB_FAIL(rc)) return rc;
+      break;
+    }
+  }
+
   if (table_meta_.storage_engine() == StorageEngine::HEAP) {
     engine_ = make_unique<HeapTableEngine>(&table_meta_, db_, this);
   } else if (table_meta_.storage_engine() == StorageEngine::LSM) {
@@ -152,6 +162,16 @@ RC Table::open(Db *db, const char *meta_file, const char *base_dir)
   //   return rc;
   // }
   RC rc = RC::SUCCESS;
+
+  for (const FieldMeta &field : *table_meta_.field_metas()) {
+    if (field.type() == AttrType::VECTORS) {
+      lob_handler_ = new LobFileHandler;
+      string lob_file = table_data_file(base_dir, table_meta_.name()) + ".vector";
+      rc = lob_handler_->open_file(lob_file.c_str());
+      if (OB_FAIL(rc)) return rc;
+      break;
+    }
+  }
 
   if (table_meta_.storage_engine() == StorageEngine::HEAP) {
     engine_ = make_unique<HeapTableEngine>(&table_meta_, db_, this);
@@ -253,6 +273,15 @@ RC Table::make_record(int value_num, const Value *values, Record &record)
 
 RC Table::set_value_to_record(char *record_data, const Value &value, const FieldMeta *field)
 {
+  if (field->type() == AttrType::VECTORS) {
+    if (value.attr_type() != AttrType::VECTORS || value.length() <= 0 || value.length() > field->len() ||
+        value.length() % sizeof(float) != 0 || lob_handler_ == nullptr) return RC::INVALID_ARGUMENT;
+    int64_t reference[2] = {0, value.length()};
+    RC rc = lob_handler_->insert_data(reference[0], reference[1], value.data());
+    if (OB_FAIL(rc)) return rc;
+    memcpy(record_data + field->offset(), reference, sizeof(reference));
+    return RC::SUCCESS;
+  }
   size_t       copy_len = field->len();
   const size_t data_len = value.length();
   if (field->type() == AttrType::CHARS) {
@@ -276,6 +305,7 @@ RC Table::get_chunk_scanner(ChunkFileScanner &scanner, Trx *trx, ReadWriteMode m
 
 RC Table::create_index(Trx *trx, const FieldMeta *field_meta, const char *index_name)
 {
+  if (field_meta->type() == AttrType::VECTORS) return RC::INVALID_ARGUMENT;
   return engine_->create_index(trx, field_meta, index_name);
 }
 
@@ -296,4 +326,17 @@ Index *Table::find_index_by_field(const char *field_name) const
 RC Table::sync()
 {
   return engine_->sync();
+}
+
+RC Table::read_vector(const char *field_data, int max_length, Value &value) const
+{
+  int64_t reference[2];
+  memcpy(reference, field_data, sizeof(reference));
+  if (lob_handler_ == nullptr || reference[0] < 0 || reference[1] <= 0 || reference[1] > max_length ||
+      reference[1] % sizeof(float) != 0) return RC::INVALID_ARGUMENT;
+  vector<float> entries(reference[1] / sizeof(float));
+  RC rc = lob_handler_->get_data(reference[0], reference[1], reinterpret_cast<char *>(entries.data()));
+  if (OB_FAIL(rc)) return rc;
+  value.set_vector(entries.data(), entries.size());
+  return RC::SUCCESS;
 }

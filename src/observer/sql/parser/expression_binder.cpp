@@ -1,3 +1,4 @@
+#include "sql/expr/vector_function_expr.h"
 /* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -50,6 +51,22 @@ RC ExpressionBinder::bind_expression(unique_ptr<Expression> &expr, vector<unique
   }
 
   switch (expr->type()) {
+    case ExprType::VECTOR_FUNCTION: {
+      auto &function = static_cast<VectorFunctionExpr &>(*expr);
+      for (auto &argument : function.arguments()) {
+        if (argument->type() == ExprType::STAR) return RC::INVALID_ARGUMENT;
+        vector<unique_ptr<Expression>> bound;
+        RC rc = bind_expression(argument, bound);
+        if (OB_FAIL(rc)) return rc;
+        if (bound.size() != 1) return RC::INVALID_ARGUMENT;
+        argument = std::move(bound[0]);
+      }
+      RC rc = function.validate();
+      if (OB_FAIL(rc)) return rc;
+      bound_expressions.emplace_back(std::move(expr));
+      return RC::SUCCESS;
+    } break;
+
     case ExprType::STAR: {
       return bind_star_expression(expr, bound_expressions);
     } break;

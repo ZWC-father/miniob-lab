@@ -142,6 +142,10 @@ ComparisonExpr::~ComparisonExpr() {}
 RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &result) const
 {
   RC  rc         = RC::SUCCESS;
+  if ((left.attr_type() == AttrType::VECTORS || right.attr_type() == AttrType::VECTORS) &&
+      (left.attr_type() != right.attr_type() || (comp_ != EQUAL_TO && comp_ != NOT_EQUAL))) {
+    return RC::INVALID_ARGUMENT;
+  }
   int cmp_result = left.compare(right);
   result         = false;
   switch (comp_) {

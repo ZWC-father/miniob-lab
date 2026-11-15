@@ -45,12 +45,18 @@ public:
   RC                 return_code() const { return return_code_; }
   const string      &state_string() const { return state_string_; }
 
+  // Vector evaluation may fail on a later row (for example, unequal dimensions).
+  // Validate the result before a protocol sends a successful result header.
+  void set_vector_result(bool value) { vector_result_ = value; }
   RC open();
   RC close();
   RC next_tuple(Tuple *&tuple);
   RC next_chunk(Chunk &chunk);
 
 private:
+  bool vector_result_ = false;
+  vector<ValueListTuple> vector_rows_;
+  size_t vector_row_position_ = 0;
   Session                     *session_ = nullptr;  ///< 当前所属会话
   unique_ptr<PhysicalOperator> operator_;           ///< 执行计划
   TupleSchema                  tuple_schema_;       ///< 返回的表头信息。可能有也可能没有
