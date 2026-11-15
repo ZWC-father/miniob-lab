@@ -115,6 +115,7 @@ public:
 
 public:
   void set_int(int val);
+  void set_date(int val);
   void set_float(float val);
   void set_string(const char *s, int len = 0);
   void set_empty_string(int len);
