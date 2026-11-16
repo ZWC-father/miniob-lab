@@ -20,6 +20,8 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/calc_physical_operator.h"
 #include "sql/operator/delete_logical_operator.h"
 #include "sql/operator/delete_physical_operator.h"
+#include "sql/operator/update_logical_operator.h"
+#include "sql/operator/update_physical_operator.h"
 #include "sql/operator/explain_logical_operator.h"
 #include "sql/operator/explain_physical_operator.h"
 #include "sql/operator/expr_vec_physical_operator.h"
@@ -69,6 +71,10 @@ RC PhysicalPlanGenerator::create(LogicalOperator &logical_operator, unique_ptr<P
 
     case LogicalOperatorType::INSERT: {
       return create_plan(static_cast<InsertLogicalOperator &>(logical_operator), oper, session);
+    } break;
+
+    case LogicalOperatorType::UPDATE: {
+      return create_plan(static_cast<UpdateLogicalOperator &>(logical_operator), oper, session);
     } break;
 
     case LogicalOperatorType::DELETE: {
@@ -132,7 +138,7 @@ RC PhysicalPlanGenerator::create_plan(TableGetLogicalOperator &table_get_oper, u
     if (expr->type() == ExprType::COMPARISON) {
       auto comparison_expr = static_cast<ComparisonExpr *>(expr.get());
       // 简单处理，就找等值查询
-      if (comparison_expr->comp() != EQUAL_TO && comparison_expr->comp() != NOT_EQUAL) {
+      if (comparison_expr->comp() != EQUAL_TO) {
         continue;
       }
 
@@ -468,4 +474,24 @@ RC PhysicalPlanGenerator::create_vec_plan(ExplainLogicalOperator &explain_oper, 
 
   oper = std::move(explain_physical_oper);
   return rc;
+}
+
+RC PhysicalPlanGenerator::create_plan(
+    UpdateLogicalOperator &logical_oper, unique_ptr<PhysicalOperator> &oper, Session *session)
+{
+  if (logical_oper.children().size() > 1) {
+    return RC::INVALID_ARGUMENT;
+  }
+  unique_ptr<PhysicalOperator> child;
+  if (!logical_oper.children().empty()) {
+    RC rc = create(*logical_oper.children().front(), child, session);
+    if (rc != RC::SUCCESS) {
+      return rc;
+    }
+  }
+  oper = make_unique<UpdatePhysicalOperator>(logical_oper.table(), logical_oper.field(), logical_oper.value());
+  if (child) {
+    oper->add_child(std::move(child));
+  }
+  return RC::SUCCESS;
 }

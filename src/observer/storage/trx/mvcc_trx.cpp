@@ -192,7 +192,8 @@ RC MvccTrx::visit_record(Table *table, Record &record, ReadWriteMode mode)
   } else if (begin_xid < 0) {
     // begin xid 小于0说明是刚插入而且没有提交的数据
     if (-begin_xid == trx_id_) {
-      rc = RC::SUCCESS;
+      // UPDATE 会在同一事务中插入再删除版本，已删除的自有版本不可再次访问。
+      rc = end_xid == -trx_id_ ? RC::RECORD_INVISIBLE : RC::SUCCESS;
     } else {
       LOG_TRACE("record invisible. someone is updating this record right now. trx id=%d, begin xid=%d, end xid=%d",
                 trx_id_, begin_xid, end_xid);
@@ -467,4 +468,14 @@ RC MvccTrx::redo(Db *db, const LogEntry &log_entry)
   }
 
   return RC::SUCCESS;
+}
+
+RC MvccTrx::update_record(Table *table, Record &old_record, Record &new_record)
+{
+  // 旧版本标记删除，新版本走原有插入路径，沿用已有提交、回滚和日志机制。
+  RC rc = delete_record(table, old_record);
+  if (rc == RC::SUCCESS) {
+    rc = insert_record(table, new_record);
+  }
+  return rc;
 }

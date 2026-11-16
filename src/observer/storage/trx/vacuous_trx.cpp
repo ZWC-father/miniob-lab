@@ -43,3 +43,20 @@ RC VacuousTrx::commit() { return RC::SUCCESS; }
 RC VacuousTrx::rollback() { return RC::SUCCESS; }
 
 RC VacuousTrx::redo(Db *, const LogEntry &) { return RC::SUCCESS; }
+
+RC VacuousTrx::update_record(Table *table, Record &old_record, Record &new_record)
+{
+  // 复用插入、删除路径维护所有索引；插入失败时旧记录仍然保留。
+  RC rc = table->insert_record(new_record);
+  if (rc != RC::SUCCESS) {
+    return rc;
+  }
+  rc = table->delete_record(old_record);
+  if (rc != RC::SUCCESS) {
+    RC rollback_rc = table->delete_record(new_record);
+    if (rollback_rc != RC::SUCCESS) {
+      LOG_ERROR("failed to undo update insertion: %s", strrc(rollback_rc));
+    }
+  }
+  return rc;
+}
