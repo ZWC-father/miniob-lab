@@ -75,6 +75,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         INDEX
         CALC
         SELECT
+        AS
         DESC
         SHOW
         SYNC
@@ -178,9 +179,11 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <key_list>            attr_list
 %type <relation_list>       rel_list
 %type <expression>          expression
+%type <expression>          select_expression
 %type <expression>          aggregate_expression
 %type <expression>          vector_function
 %type <expression_list>     expression_list
+%type <expression_list>     select_expression_list
 %type <expression_list>     group_by
 %type <cstring>             fields_terminated_by
 %type <cstring>             enclosed_by
@@ -509,13 +512,13 @@ update_stmt:      /*  update 语句的语法解析树*/
     }
     ;
 select_stmt:        /*  select 语句的语法解析树*/
-    SELECT expression_list
+    SELECT select_expression_list
     {
       $$ = new ParsedSqlNode(SCF_CALC);
       $$->calc.expressions.swap(*$2);
       delete $2;
     }
-    | SELECT expression_list FROM rel_list where group_by
+    | SELECT select_expression_list FROM rel_list where group_by
     {
       $$ = new ParsedSqlNode(SCF_SELECT);
       if ($2 != nullptr) {
@@ -545,6 +548,29 @@ calc_stmt:
       $$ = new ParsedSqlNode(SCF_CALC);
       $$->calc.expressions.swap(*$2);
       delete $2;
+    }
+    ;
+
+// Output aliases belong to the SELECT list, not function arguments or predicates.
+select_expression_list:
+    select_expression
+    {
+      $$ = new vector<unique_ptr<Expression>>;
+      $$->emplace_back($1);
+    }
+    | select_expression COMMA select_expression_list
+    {
+      $$ = $3;
+      $$->emplace($$->begin(), $1);
+    }
+    ;
+
+select_expression:
+    expression { $$ = $1; }
+    | expression AS ID
+    {
+      $$ = $1;
+      $$->set_alias($3);
     }
     ;
 

@@ -123,6 +123,9 @@ RC ExpressionBinder::bind_star_expression(
   }
 
   auto star_expr = static_cast<StarExpr *>(expr.get());
+  if (star_expr->has_alias()) {
+    return RC::INVALID_ARGUMENT;
+  }
 
   vector<Table *> tables_to_wildcard;
 
@@ -187,6 +190,9 @@ RC ExpressionBinder::bind_unbound_field_expression(
     Field      field(table, field_meta);
     FieldExpr *field_expr = new FieldExpr(field);
     field_expr->set_name(field_name);
+    if (unbound_field_expr->has_alias()) {
+      field_expr->set_alias(unbound_field_expr->name());
+    }
     bound_expressions.emplace_back(field_expr);
   }
 

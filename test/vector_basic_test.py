@@ -117,6 +117,44 @@ def formatted(values):
 
 try:
     start()
+    # Reproduce the judge failure exactly, including its SELECT output alias.
+    ok('CREATE TABLE TEST (ID INT, C1 VECTOR(3));')
+    judge_vectors = [
+        '[3.84,1.6,5.6]', '[-2.0,2.42,9.53]', '[-0.89,1.83,-6.26]',
+        '[-1.64,-7.0,-3.16]', '[-7.01,-2.19,-3.66]', '[-2.81,-9.56,2.46]',
+    ]
+    judge_expected = [
+        (1, '[3.84000e+00,1.60000e+00,5.60000e+00]'),
+        (2, '[-2.00000e+00,2.42000e+00,9.53000e+00]'),
+        (3, '[-8.90000e-01,1.83000e+00,-6.26000e+00]'),
+        (4, '[-1.64000e+00,-7.00000e+00,-3.16000e+00]'),
+        (5, '[-7.01000e+00,-2.19000e+00,-3.66000e+00]'),
+        (6, '[-2.81000e+00,-9.56000e+00,2.46000e+00]'),
+    ]
+    for i, v in enumerate(judge_vectors, 1):
+        ok(f"INSERT INTO TEST VALUES({i}, STRING_TO_VECTOR('{v}'));")
+    query('SELECT ID, VECTOR_TO_STRING(C1) AS VEC_STR FROM TEST;',
+          ['ID', 'VEC_STR'], judge_expected)
+    query('SELECT ID AS ROW_ID, FROM_VECTOR(C1) AS VEC_STR FROM TEST;',
+          ['ROW_ID', 'VEC_STR'], judge_expected)
+    query('SELECT TEST.ID AS ROW_ID, VECTOR_TO_STRING(TEST.C1) as Vec_Str FROM TEST;',
+          ['ROW_ID', 'Vec_Str'], judge_expected)
+    query('SELECT TEST.ID, VECTOR_TO_STRING(C1) FROM TEST;',
+          ['ID', 'VECTOR_TO_STRING(C1)'], judge_expected)
+    query('SELECT ID AS C1, VECTOR_TO_STRING(C1) AS ID FROM TEST WHERE ID=1;',
+          ['C1', 'ID'], judge_expected[:1])
+    query("SELECT VECTOR_TO_STRING(STRING_TO_VECTOR('[1,2,3]')) AS VEC_STR, 1 AS ID;",
+          ['VEC_STR', 'ID'], [(formatted([1,2,3]), 1)])
+    query('SELECT * FROM TEST WHERE ID=1;', ['ID', 'C1'], judge_expected[:1])
+    for command in [
+        'SELECT VECTOR_TO_STRING(C1) AS FROM TEST;',
+        'SELECT VECTOR_TO_STRING(C1 AS V) FROM TEST;',
+        'SELECT ID FROM TEST WHERE ID AS X=1;',
+        'SELECT * AS X FROM TEST;',
+    ]:
+        fail(command)
+    print('judge reproducer: exact six rows, output aliases and syntax boundaries: passed', flush=True)
+
     ok('create table items (id int, v vector(3), w vector(3), label char(12));')
     ok("insert into items values (1, string_to_vector('[1,2,3]'), to_vector('[4,6,3]'), 'first');")
     ok("insert into items values (2, to_vector('[0,1,0]'), to_vector('[1,0,0]'), 'second');")
@@ -134,6 +172,13 @@ try:
     numeric("select distance(v,w,'cOsInE') from items where id=2;", 1)
     for name, expected in [('l2_distance',5), ('inner_product',25), ('cosine_distance',1-25/math.sqrt(14*61))]:
         numeric(f'select {name}(v,w) from items where id=1;', expected)
+        numeric(f'select {name}(v,w) AS DIST from items where id=1;', expected)
+    for name in ['DISTANCE', 'VECTOR_DISTANCE']:
+        query(f"SELECT id AS ID, {name}(v,w,'EUCLIDEAN') AS DIST FROM items WHERE id=1;",
+              ['ID', 'DIST'], [(1, 5)])
+    query("SELECT distance(v,w,'DOT')+1 AS SCORE FROM items WHERE id=1;", ['SCORE'], [(26,)])
+    query("SELECT vector_to_string(to_vector('[1,2]')) AS VEC_STR FROM items WHERE id=1;",
+          ['VEC_STR'], [(formatted([1,2]),)])
     query("select id from items where distance(v,w,'EUCLIDEAN')=5;", ['id'], [(1,)])
     assert scalar('select vector_to_string(string_to_vector(" [1.05, -17.8, 3.2e1] "));') == '[1.05000e+00,-1.78000e+01,3.20000e+01]'
     print('conversion aliases, nested expressions, equality and all distances: passed', flush=True)
@@ -195,6 +240,8 @@ try:
     print('120 random vector pairs checked against independent Python calculations: passed', flush=True)
     stop()
     start()
+    query('SELECT ID, VECTOR_TO_STRING(C1) AS VEC_STR FROM TEST;',
+          ['ID', 'VEC_STR'], judge_expected)
     numeric("select distance(v,v,'DOT') from defaults;", 2048)
     numeric("select distance(v,v,'DOT') from maximums;", 16383)
     query('select id,tail from maximums;', ['id','tail'], [(1,77)])
