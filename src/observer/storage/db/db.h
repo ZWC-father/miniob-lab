@@ -70,6 +70,9 @@ public:
   RC create_table(const char *table_name, span<const AttrInfoSqlNode> attributes, const vector<string> &primary_keys,
       const StorageFormat storage_format = StorageFormat::ROW_FORMAT);
 
+  /// @brief 删除表及其数据、索引和其他关联文件。调用者需保证没有正在使用该表的事务。
+  RC drop_table(const char *table_name);
+
   /**
    * @brief 根据表名查找表
    */

@@ -176,6 +176,53 @@ RC Db::create_table(const char *table_name, span<const AttrInfoSqlNode> attribut
   return RC::SUCCESS;
 }
 
+RC Db::drop_table(const char *table_name)
+{
+  if (common::is_blank(table_name)) {
+    return RC::INVALID_ARGUMENT;
+  }
+  auto iter = opened_tables_.find(table_name);
+  if (iter == opened_tables_.end()) {
+    return RC::SCHEMA_TABLE_NOT_EXIST;
+  }
+
+  Table           *table     = iter->second;
+  const string     name      = table->name();
+  const string     meta_file = table_meta_file(path_.c_str(), name.c_str());
+  vector<string>   files;
+  const TableMeta &meta = table->table_meta();
+  for (int i = 0; i < meta.index_num(); i++) {
+    files.push_back(table_index_file(path_.c_str(), name.c_str(), meta.index(i)->name()));
+  }
+  files.push_back(table_data_file(path_.c_str(), name.c_str()));
+  files.push_back(table_lob_file(path_.c_str(), name.c_str()));
+  files.push_back(meta_file + ".tmp");
+
+  // 删除前推进检查点，重启时不能再回放引用已删除表和缓冲池的日志。
+  RC rc = sync();
+  if (OB_FAIL(rc)) {
+    return rc;
+  }
+
+  // 元数据删除失败时保留已打开的表；成功后重启也不会再加载该表。
+  if (::unlink(meta_file.c_str()) != 0) {
+    LOG_ERROR("Failed to remove table meta. file=%s, error=%s", meta_file.c_str(), strerror(errno));
+    return RC::FILE_REMOVE;
+  }
+
+  opened_tables_.erase(iter);
+  // Table 的析构释放记录处理器、索引、缓冲池和 LOB 文件句柄。
+  delete table;
+
+  for (const string &file : files) {
+    if (::unlink(file.c_str()) != 0 && errno != ENOENT) {
+      LOG_ERROR("Failed to remove table resource. file=%s, error=%s", file.c_str(), strerror(errno));
+      rc = RC::FILE_REMOVE;
+    }
+  }
+  return rc;
+}
+
 Table *Db::find_table(const char *table_name) const
 {
   unordered_map<string, Table *>::const_iterator iter = opened_tables_.find(table_name);
@@ -292,7 +339,8 @@ RC Db::recover()
     return RC::INTERNAL;
   }
 
-  IntegratedLogReplayer log_replayer(*buffer_pool_manager_, unique_ptr<LogReplayer>(trx_log_replayer));
+  IntegratedLogReplayer log_replayer(
+      *buffer_pool_manager_, unique_ptr<LogReplayer>(trx_log_replayer), check_point_lsn_);
   RC                    rc = log_handler_->replay(log_replayer, check_point_lsn_ /*start_lsn*/);
   if (OB_FAIL(rc)) {
     LOG_WARN("failed to replay log. rc=%s", strrc(rc));
@@ -397,6 +445,10 @@ RC Db::flush_meta()
     }
   }
 
+  if (close(fd) < 0 && OB_SUCC(rc)) {
+    LOG_ERROR("Failed to close db meta file. file=%s, errno=%s", temp_meta_file_path.c_str(), strerror(errno));
+    rc = RC::IOERR_CLOSE;
+  }
   return rc;
 }
 
