@@ -19,6 +19,13 @@ See the Mulan PSL v2 for more details. */
 
 RC CreateTableStmt::create(Db *db, const CreateTableSqlNode &create_table, Stmt *&stmt)
 {
+  for (const auto &attribute : create_table.attr_infos) {
+    if (attribute.type == AttrType::VECTORS) {
+      for (const auto &key : create_table.primary_keys) {
+        if (key == attribute.name) return RC::INVALID_ARGUMENT;
+      }
+    }
+  }
   StorageFormat storage_format = get_storage_format(create_table.storage_format.c_str());
   if (storage_format == StorageFormat::UNKNOWN_FORMAT) {
     return RC::INVALID_ARGUMENT;

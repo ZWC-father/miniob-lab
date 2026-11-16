@@ -1,3 +1,4 @@
+#include "sql/expr/vector_function_expr.h"
 /* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -50,6 +51,22 @@ RC ExpressionBinder::bind_expression(unique_ptr<Expression> &expr, vector<unique
   }
 
   switch (expr->type()) {
+    case ExprType::VECTOR_FUNCTION: {
+      auto &function = static_cast<VectorFunctionExpr &>(*expr);
+      for (auto &argument : function.arguments()) {
+        if (argument->type() == ExprType::STAR) return RC::INVALID_ARGUMENT;
+        vector<unique_ptr<Expression>> bound;
+        RC rc = bind_expression(argument, bound);
+        if (OB_FAIL(rc)) return rc;
+        if (bound.size() != 1) return RC::INVALID_ARGUMENT;
+        argument = std::move(bound[0]);
+      }
+      RC rc = function.validate();
+      if (OB_FAIL(rc)) return rc;
+      bound_expressions.emplace_back(std::move(expr));
+      return RC::SUCCESS;
+    } break;
+
     case ExprType::STAR: {
       return bind_star_expression(expr, bound_expressions);
     } break;
@@ -106,6 +123,9 @@ RC ExpressionBinder::bind_star_expression(
   }
 
   auto star_expr = static_cast<StarExpr *>(expr.get());
+  if (star_expr->has_alias()) {
+    return RC::INVALID_ARGUMENT;
+  }
 
   vector<Table *> tables_to_wildcard;
 
@@ -170,6 +190,9 @@ RC ExpressionBinder::bind_unbound_field_expression(
     Field      field(table, field_meta);
     FieldExpr *field_expr = new FieldExpr(field);
     field_expr->set_name(field_name);
+    if (unbound_field_expr->has_alias()) {
+      field_expr->set_alias(unbound_field_expr->name());
+    }
     bound_expressions.emplace_back(field_expr);
   }
 
@@ -332,6 +355,15 @@ RC ExpressionBinder::bind_arithmetic_expression(
   unique_ptr<Expression> &left = child_bound_expressions[0];
   if (left.get() != left_expr.get()) {
     left_expr.reset(left.release());
+  }
+
+  // 一元负号只有左操作数，不应要求不存在的右侧绑定出一个表达式。
+  if (arithmetic_expr->arithmetic_type() == ArithmeticExpr::Type::NEGATIVE) {
+    if (right_expr) {
+      return RC::INVALID_ARGUMENT;
+    }
+    bound_expressions.emplace_back(std::move(expr));
+    return RC::SUCCESS;
   }
 
   child_bound_expressions.clear();

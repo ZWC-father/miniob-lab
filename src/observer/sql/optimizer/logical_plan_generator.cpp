@@ -29,6 +29,8 @@ See the Mulan PSL v2 for more details. */
 
 #include "sql/stmt/calc_stmt.h"
 #include "sql/stmt/delete_stmt.h"
+#include "sql/stmt/update_stmt.h"
+#include "sql/operator/update_logical_operator.h"
 #include "sql/stmt/explain_stmt.h"
 #include "sql/stmt/filter_stmt.h"
 #include "sql/stmt/insert_stmt.h"
@@ -60,6 +62,10 @@ RC LogicalPlanGenerator::create(Stmt *stmt, unique_ptr<LogicalOperator> &logical
       InsertStmt *insert_stmt = static_cast<InsertStmt *>(stmt);
 
       rc = create_plan(insert_stmt, logical_operator);
+    } break;
+
+    case StmtType::UPDATE: {
+      rc = create_plan(static_cast<UpdateStmt *>(stmt), logical_operator);
     } break;
 
     case StmtType::DELETE: {
@@ -158,11 +164,11 @@ RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<Logical
     const FilterObj &filter_obj_left  = filter_unit->left();
     const FilterObj &filter_obj_right = filter_unit->right();
 
-    unique_ptr<Expression> left(filter_obj_left.is_attr
+    unique_ptr<Expression> left(filter_unit->left_expression ? filter_unit->left_expression->copy().release() : filter_obj_left.is_attr
                                     ? static_cast<Expression *>(new FieldExpr(filter_obj_left.field))
                                     : static_cast<Expression *>(new ValueExpr(filter_obj_left.value)));
 
-    unique_ptr<Expression> right(filter_obj_right.is_attr
+    unique_ptr<Expression> right(filter_unit->right_expression ? filter_unit->right_expression->copy().release() : filter_obj_right.is_attr
                                      ? static_cast<Expression *>(new FieldExpr(filter_obj_right.field))
                                      : static_cast<Expression *>(new ValueExpr(filter_obj_right.value)));
 
@@ -355,5 +361,23 @@ RC LogicalPlanGenerator::create_group_by_plan(SelectStmt *select_stmt, unique_pt
   auto group_by_oper = make_unique<GroupByLogicalOperator>(std::move(group_by_expressions),
                                                            std::move(aggregate_expressions));
   logical_operator = std::move(group_by_oper);
+  return RC::SUCCESS;
+}
+
+RC LogicalPlanGenerator::create_plan(UpdateStmt *stmt, unique_ptr<LogicalOperator> &logical_operator)
+{
+  unique_ptr<LogicalOperator> scan(new TableGetLogicalOperator(stmt->table(), ReadWriteMode::READ_WRITE));
+  unique_ptr<LogicalOperator> predicate;
+  RC rc = create_plan(stmt->filter_stmt(), predicate);
+  if (rc != RC::SUCCESS) {
+    return rc;
+  }
+  if (predicate) {
+    predicate->add_child(std::move(scan));
+    scan = std::move(predicate);
+  }
+  auto update = make_unique<UpdateLogicalOperator>(stmt->table(), stmt->field(), stmt->value());
+  update->add_child(std::move(scan));
+  logical_operator = std::move(update);
   return RC::SUCCESS;
 }

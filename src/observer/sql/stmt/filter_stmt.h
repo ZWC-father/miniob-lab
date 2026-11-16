@@ -26,7 +26,7 @@ class FieldMeta;
 
 struct FilterObj
 {
-  bool  is_attr;
+  bool  is_attr = false;
   Field field;
   Value value;
 
@@ -55,6 +55,9 @@ public:
 
   void set_left(const FilterObj &obj) { left_ = obj; }
   void set_right(const FilterObj &obj) { right_ = obj; }
+
+  unique_ptr<Expression> left_expression;
+  unique_ptr<Expression> right_expression;
 
   const FilterObj &left() const { return left_; }
   const FilterObj &right() const { return right_; }

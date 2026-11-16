@@ -39,6 +39,9 @@ public:
 
   LogReplayer *create_log_replayer(Db &db, LogHandler &log_handler) override;
 
+  int32_t checkpoint_trx_id() const override { return current_trx_id_.load(); }
+  void recover_trx_id(int32_t trx_id) override;
+
 public:
   int32_t next_trx_id();
 
@@ -73,7 +76,7 @@ public:
 
   RC insert_record(Table *table, Record &record) override;
   RC delete_record(Table *table, Record &record) override;
-  RC update_record(Table *table, Record &old_record, Record &new_record) override { return RC::UNIMPLEMENTED; };
+  RC update_record(Table *table, Record &old_record, Record &new_record) override;
 
   /**
    * @brief 当访问到某条数据时，使用此函数来判断是否可见，或者是否有访问冲突

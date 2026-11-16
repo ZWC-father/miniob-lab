@@ -43,7 +43,7 @@ public:
    * @details
    * 区别于另一个构造函数，这个构造函数可以指定不同的事务日志回放器。比如进程启动时可以指定选择使用VacuousTrx还是MvccTrx。
    */
-  IntegratedLogReplayer(BufferPoolManager &bpm, unique_ptr<LogReplayer> trx_log_replayer);
+  IntegratedLogReplayer(BufferPoolManager &bpm, unique_ptr<LogReplayer> trx_log_replayer, LSN check_point_lsn = 0);
   virtual ~IntegratedLogReplayer() = default;
 
   //! @copydoc LogReplayer::replay
@@ -57,4 +57,5 @@ private:
   RecordLogReplayer       record_log_replayer_;       ///< record manager 日志回放器
   BplusTreeLogReplayer    bplus_tree_log_replayer_;   ///< bplus tree 日志回放器
   unique_ptr<LogReplayer> trx_log_replayer_;          ///< trx 日志回放器
+  LSN                    check_point_lsn_ = 0;       ///< 已经刷盘的日志，不再重复回放
 };

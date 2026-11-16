@@ -44,6 +44,12 @@ const vector<FieldMeta> *MvccTrxKit::trx_fields() const { return &fields_; }
 
 int32_t MvccTrxKit::next_trx_id() { return ++current_trx_id_; }
 
+void MvccTrxKit::recover_trx_id(int32_t trx_id)
+{
+  int32_t current = current_trx_id_.load();
+  while (current < trx_id && !current_trx_id_.compare_exchange_weak(current, trx_id)) {}
+}
+
 int32_t MvccTrxKit::max_trx_id() const { return numeric_limits<int32_t>::max(); }
 
 Trx *MvccTrxKit::create_trx(LogHandler &log_handler)
@@ -63,9 +69,7 @@ Trx *MvccTrxKit::create_trx(LogHandler &log_handler, int32_t trx_id)
   if (trx != nullptr) {
     lock_.lock();
     trxes_.push_back(trx);
-    if (current_trx_id_ < trx_id) {
-      current_trx_id_ = trx_id;
-    }
+    recover_trx_id(trx_id);
     lock_.unlock();
   }
   return trx;
@@ -192,7 +196,8 @@ RC MvccTrx::visit_record(Table *table, Record &record, ReadWriteMode mode)
   } else if (begin_xid < 0) {
     // begin xid 小于0说明是刚插入而且没有提交的数据
     if (-begin_xid == trx_id_) {
-      rc = RC::SUCCESS;
+      // UPDATE 会在同一事务中插入再删除版本，已删除的自有版本不可再次访问。
+      rc = end_xid == -trx_id_ ? RC::RECORD_INVISIBLE : RC::SUCCESS;
     } else {
       LOG_TRACE("record invisible. someone is updating this record right now. trx id=%d, begin xid=%d, end xid=%d",
                 trx_id_, begin_xid, end_xid);
@@ -344,22 +349,22 @@ RC MvccTrx::rollback()
         Table *table = operation.table();
         // 这里也可以不删除，仅仅给数据加个标识位，等垃圾回收器来收割也行
         Record record;
-        record.set_rid(rid);
+        // 回滚 UPDATE 新版本时，删除索引还需要字段内容，不能只传 RID。
+        rc = table->get_record(rid, record);
+        if (OB_FAIL(rc)) {
+          if (recovering_ && rc == RC::RECORD_NOT_EXIST) {
+            continue;
+          }
+          LOG_WARN("failed to get record while rollback. table=%s, rid=%s, rc=%s",
+                   table->name(), rid.to_string().c_str(), strrc(rc));
+          return rc;
+        }
         if (recovering_) {
           // 恢复的时候，需要额外判断下当前记录是否还是当前事务拥有。是的话才能删除记录
-          rc = table->get_record(rid, record);
-          if (OB_SUCC(rc)) {
-            Field begin_xid_field, end_xid_field;
-            trx_fields(table, begin_xid_field, end_xid_field);
-            if (begin_xid_field.get_int(record) != -trx_id_) {
-              continue;
-            }
-          } else if (RC::RECORD_NOT_EXIST == rc) {
+          Field begin_xid_field, end_xid_field;
+          trx_fields(table, begin_xid_field, end_xid_field);
+          if (begin_xid_field.get_int(record) != -trx_id_) {
             continue;
-          } else {
-            LOG_WARN("failed to get record while rollback. table=%s, rid=%s, rc=%s", 
-                     table->name(), rid.to_string().c_str(), strrc(rc));
-            return rc;
           }
         }
         rc = table->delete_record(record);
@@ -450,8 +455,11 @@ RC MvccTrx::redo(Db *db, const LogEntry &log_entry)
     } break;
 
     case MvccTrxLogOperation::Type::COMMIT: {
-      // auto *trx_log_record = reinterpret_cast<const MvccTrxCommitLogEntry *>(log_entry.data());
-      // commit_with_trx_id(trx_log_record->commit_trx_id);
+      if (log_entry.payload_size() < MvccTrxCommitLogEntry::SIZE) {
+        return RC::LOG_ENTRY_INVALID;
+      }
+      auto *trx_log_record = reinterpret_cast<const MvccTrxCommitLogEntry *>(log_entry.data());
+      trx_kit_.recover_trx_id(trx_log_record->commit_trx_id);
       // 遇到了提交日志，说明前面的记录都已经提交成功了
     } break;
 
@@ -467,4 +475,14 @@ RC MvccTrx::redo(Db *db, const LogEntry &log_entry)
   }
 
   return RC::SUCCESS;
+}
+
+RC MvccTrx::update_record(Table *table, Record &old_record, Record &new_record)
+{
+  // 旧版本标记删除，新版本走原有插入路径，沿用已有提交、回滚和日志机制。
+  RC rc = delete_record(table, old_record);
+  if (rc == RC::SUCCESS) {
+    rc = insert_record(table, new_record);
+  }
+  return rc;
 }

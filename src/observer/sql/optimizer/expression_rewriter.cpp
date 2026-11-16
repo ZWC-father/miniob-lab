@@ -1,3 +1,4 @@
+#include "sql/expr/vector_function_expr.h"
 /* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -83,6 +84,15 @@ RC ExpressionRewriter::rewrite_expression(unique_ptr<Expression> &expr, bool &ch
   }
 
   switch (expr->type()) {
+    case ExprType::VECTOR_FUNCTION: {
+      for (auto &argument : static_cast<VectorFunctionExpr &>(*expr).arguments()) {
+        bool changed = false;
+        rc = rewrite_expression(argument, changed);
+        change_made |= changed;
+        if (OB_FAIL(rc)) return rc;
+      }
+    } break;
+
     case ExprType::FIELD:
     case ExprType::VALUE: {
       // do nothing

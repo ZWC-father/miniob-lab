@@ -18,6 +18,72 @@ See the Mulan PSL v2 for more details. */
 
 using namespace std;
 
+TEST(ParserTest, vector_select_alias)
+{
+  ParsedSqlResult result;
+  ASSERT_EQ(parse("SELECT ID, VECTOR_TO_STRING(C1) AS VEC_STR FROM TEST;", &result), RC::SUCCESS);
+  ASSERT_EQ(result.sql_nodes().size(), 1);
+  ASSERT_EQ(result.sql_nodes()[0]->flag, SCF_SELECT);
+  auto &expressions = result.sql_nodes()[0]->selection.expressions;
+  ASSERT_EQ(expressions.size(), 2);
+  EXPECT_STREQ(expressions[0]->name(), "ID");
+  EXPECT_FALSE(expressions[0]->has_alias());
+  EXPECT_EQ(expressions[1]->type(), ExprType::VECTOR_FUNCTION);
+  EXPECT_STREQ(expressions[1]->name(), "VEC_STR");
+  EXPECT_TRUE(expressions[1]->has_alias());
+}
+
+TEST(ParserTest, vector_constant_alias)
+{
+  ParsedSqlResult result;
+  ASSERT_EQ(parse("SELECT VECTOR_TO_STRING(TO_VECTOR('[1,2]')) as Vec_Str, 1 AS ID;", &result), RC::SUCCESS);
+  ASSERT_EQ(result.sql_nodes().size(), 1);
+  ASSERT_EQ(result.sql_nodes()[0]->flag, SCF_CALC);
+  auto &expressions = result.sql_nodes()[0]->calc.expressions;
+  ASSERT_EQ(expressions.size(), 2);
+  EXPECT_STREQ(expressions[0]->name(), "Vec_Str");
+  EXPECT_STREQ(expressions[1]->name(), "ID");
+}
+
+TEST(ParserTest, aliases_only_in_select_list)
+{
+  for (const char *sql : {"SELECT VECTOR_TO_STRING(C1 AS V) FROM TEST;",
+           "SELECT ID FROM TEST WHERE ID AS X=1;", "SELECT ID AS FROM TEST;"}) {
+    ParsedSqlResult result;
+    parse(sql, &result);
+    ASSERT_EQ(result.sql_nodes().size(), 1) << sql;
+    EXPECT_EQ(result.sql_nodes()[0]->flag, SCF_ERROR) << sql;
+  }
+}
+
+TEST(ParserTest, update_constants_after_merge)
+{
+  for (const char *sql : {"UPDATE t SET n=-7;", "UPDATE t SET f=-2.25;",
+           "UPDATE t SET d='2000-2-29';", "UPDATE t SET v=TO_VECTOR('[1,2]');",
+           "UPDATE t SET s='';"}) {
+    ParsedSqlResult result;
+    ASSERT_EQ(parse(sql, &result), RC::SUCCESS);
+    ASSERT_EQ(result.sql_nodes().size(), 1);
+    ASSERT_EQ(result.sql_nodes()[0]->flag, SCF_UPDATE) << sql;
+    const Value &value = result.sql_nodes()[0]->update.value;
+    ASSERT_NE(value.data(), nullptr) << sql;
+    if (value.attr_type() == AttrType::CHARS && value.length() == 0) {
+      EXPECT_STREQ(value.data(), "");
+      Value copy(value);
+      EXPECT_STREQ(copy.data(), "");
+      copy = value;
+      EXPECT_STREQ(copy.data(), "");
+    }
+  }
+  for (const char *sql : {"UPDATE t SET n=n+1;", "UPDATE t SET v=TO_VECTOR(s);",
+           "UPDATE t SET v=TO_VECTOR('[]');"}) {
+    ParsedSqlResult result;
+    parse(sql, &result);
+    ASSERT_EQ(result.sql_nodes().size(), 1);
+    EXPECT_EQ(result.sql_nodes()[0]->flag, SCF_ERROR) << sql;
+  }
+}
+
 TEST(ParserTest, DISABLED_aggregation_test)
 {
   ParsedSqlResult result;

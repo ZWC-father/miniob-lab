@@ -40,6 +40,8 @@ public:
   AttrType    type() const;
   int         offset() const;
   int         len() const;
+  // Vector len() is the capacity in bytes; rows hold a LOB offset and actual byte length.
+  int storage_len() const { return attr_type_ == AttrType::VECTORS ? 2 * sizeof(int64_t) : attr_len_; }
   bool        visible() const;
   int         field_id() const;
 

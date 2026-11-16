@@ -90,7 +90,7 @@ RC TableMeta::init(int32_t table_id, const char *name, const vector<FieldMeta> *
       return rc;
     }
 
-    field_offset += attr_info.length;
+    field_offset += fields_[i + trx_field_num].storage_len();
   }
 
   primary_keys_ = primary_keys;
@@ -287,7 +287,7 @@ int TableMeta::deserialize(istream &is)
   storage_engine_ = static_cast<StorageEngine>(storage_engine);
   name_.swap(table_name);
   fields_.swap(fields);
-  record_size_ = fields_.back().offset() + fields_.back().len() - fields_.begin()->offset();
+  record_size_ = fields_.back().offset() + fields_.back().storage_len() - fields_.begin()->offset();
 
   for (const FieldMeta &field_meta : fields_) {
     if (!field_meta.visible()) {

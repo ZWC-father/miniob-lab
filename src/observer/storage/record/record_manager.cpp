@@ -200,9 +200,9 @@ RC RecordPageHandler::init_empty_page(DiskBufferPool &buffer_pool, LogHandler &l
   for (int i = 0; i < column_num; ++i) {
     ASSERT(i == table_meta->field(i)->field_id(), "i should be the col_id of fields[i]");
     if (i == 0) {
-      column_index[i] = table_meta->field(i)->len() * page_header_->record_capacity;
+      column_index[i] = table_meta->field(i)->storage_len() * page_header_->record_capacity;
     } else {
-      column_index[i] = table_meta->field(i)->len() * page_header_->record_capacity + column_index[i - 1];
+      column_index[i] = table_meta->field(i)->storage_len() * page_header_->record_capacity + column_index[i - 1];
     }
   }
 

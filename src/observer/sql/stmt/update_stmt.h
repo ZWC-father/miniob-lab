@@ -14,31 +14,33 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
-#include "common/sys/rc.h"
 #include "sql/stmt/stmt.h"
+#include "sql/parser/parse_defs.h"
+#include "storage/field/field_meta.h"
 
 class Table;
+class FilterStmt;
 
-/**
- * @brief 更新语句
- * @ingroup Statement
- */
+/** 单字段常量赋值的 UPDATE 语句。 */
 class UpdateStmt : public Stmt
 {
 public:
-  UpdateStmt() = default;
-  UpdateStmt(Table *table, Value *values, int value_amount);
+  UpdateStmt(Table *table, const FieldMeta &field, const Value &value, FilterStmt *filter_stmt)
+      : table_(table), field_(field), value_(value), filter_stmt_(filter_stmt)
+  {}
+  ~UpdateStmt() override;
 
-public:
+  StmtType type() const override { return StmtType::UPDATE; }
+  Table *table() const { return table_; }
+  const FieldMeta &field() const { return field_; }
+  const Value &value() const { return value_; }
+  FilterStmt *filter_stmt() const { return filter_stmt_; }
+
   static RC create(Db *db, const UpdateSqlNode &update_sql, Stmt *&stmt);
 
-public:
-  Table *table() const { return table_; }
-  Value *values() const { return values_; }
-  int    value_amount() const { return value_amount_; }
-
 private:
-  Table *table_        = nullptr;
-  Value *values_       = nullptr;
-  int    value_amount_ = 0;
+  Table *table_;
+  FieldMeta field_;
+  Value value_;
+  FilterStmt *filter_stmt_;
 };

@@ -22,15 +22,21 @@ IntegratedLogReplayer::IntegratedLogReplayer(BufferPoolManager &bpm)
       trx_log_replayer_(nullptr)
 {}
 
-IntegratedLogReplayer::IntegratedLogReplayer(BufferPoolManager &bpm, unique_ptr<LogReplayer> trx_log_replayer)
+IntegratedLogReplayer::IntegratedLogReplayer(
+    BufferPoolManager &bpm, unique_ptr<LogReplayer> trx_log_replayer, LSN check_point_lsn)
     : buffer_pool_log_replayer_(bpm),
       record_log_replayer_(bpm),
       bplus_tree_log_replayer_(bpm),
-      trx_log_replayer_(std::move(trx_log_replayer))
+      trx_log_replayer_(std::move(trx_log_replayer)),
+      check_point_lsn_(check_point_lsn)
 {}
 
 RC IntegratedLogReplayer::replay(const LogEntry &entry)
 {
+  // 日志迭代包含起始 LSN，但检查点所在的日志已经持久化，可能引用已删除的表。
+  if (check_point_lsn_ > 0 && entry.lsn() <= check_point_lsn_) {
+    return RC::SUCCESS;
+  }
   switch (entry.module().id()) {
     case LogModule::Id::BUFFER_POOL: return buffer_pool_log_replayer_.replay(entry);
     case LogModule::Id::RECORD_MANAGER: return record_log_replayer_.replay(entry);

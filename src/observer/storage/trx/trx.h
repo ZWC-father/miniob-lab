@@ -129,6 +129,10 @@ public:
 
   virtual LogReplayer *create_log_replayer(Db &db, LogHandler &log_handler) = 0;
 
+  // 检查点跳过旧日志时，仍须恢复事务编号，保证旧版本的可见性判断正确。
+  virtual int32_t checkpoint_trx_id() const { return 0; }
+  virtual void recover_trx_id(int32_t trx_id) {}
+
 public:
   static TrxKit *create(const char *name, Db *db);
 };

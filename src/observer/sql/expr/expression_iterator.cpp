@@ -1,3 +1,4 @@
+#include "sql/expr/vector_function_expr.h"
 /* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -23,6 +24,13 @@ RC ExpressionIterator::iterate_child_expr(Expression &expr, function<RC(unique_p
   RC rc = RC::SUCCESS;
 
   switch (expr.type()) {
+    case ExprType::VECTOR_FUNCTION: {
+      for (auto &argument : static_cast<VectorFunctionExpr &>(expr).arguments()) {
+        rc = callback(argument);
+        if (OB_FAIL(rc)) break;
+      }
+    } break;
+
     case ExprType::CAST: {
       auto &cast_expr = static_cast<CastExpr &>(expr);
       rc = callback(cast_expr.child());

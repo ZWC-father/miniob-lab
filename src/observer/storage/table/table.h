@@ -118,10 +118,11 @@ public:
   const TableMeta &table_meta() const;
 
   LobFileHandler *lob_handler() const { return lob_handler_; }
+  RC read_vector(const char *field_data, int max_length, Value &value) const;
 
   RC sync();
 
-private:
+  // INSERT 和 UPDATE 共用字段编码，向量字段写入 LOB 引用而非元素字节。
   RC set_value_to_record(char *record_data, const Value &value, const FieldMeta *field);
 
 private:

@@ -37,11 +37,13 @@ RC PlainCommunicator::read_event(SessionEvent *&event)
   int data_len = 0;
   int read_len = 0;
 
-  const int    max_packet_size = 8192;
+  // Two maximum-length vector arguments can exceed the old 8 KiB packet.
+  const int    max_packet_size = 1 << 20;
   vector<char> buf(max_packet_size);
 
   // 持续接收消息，直到遇到'\0'。将'\0'遇到的后续数据直接丢弃没有处理，因为目前仅支持一收一发的模式
   while (true) {
+    if (data_len == max_packet_size) return RC::IOERR_TOO_LONG;
     read_len = ::read(fd_, buf.data() + data_len, max_packet_size - data_len);
     if (read_len < 0) {
       if (errno == EAGAIN) {

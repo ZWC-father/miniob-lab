@@ -46,6 +46,7 @@ enum class ExprType
   COMPARISON,   ///< 需要做比较的表达式
   CONJUNCTION,  ///< 多个表达式使用同一种关系(AND或OR)来联结
   ARITHMETIC,   ///< 算术运算
+  VECTOR_FUNCTION, ///< vector-basic conversion and distance functions
   AGGREGATION,  ///< 聚合运算
 };
 
@@ -117,6 +118,10 @@ public:
   virtual const char *name() const { return name_.c_str(); }
   virtual void        set_name(string name) { name_ = name; }
 
+  // Keep an explicit SELECT alias when an unbound field is resolved.
+  bool has_alias() const { return has_alias_; }
+  void set_alias(const char *alias) { set_name(alias); has_alias_ = true; }
+
   /**
    * @brief 表达式在下层算子返回的 chunk 中的位置
    */
@@ -139,6 +144,7 @@ protected:
 
 private:
   string name_;
+  bool has_alias_ = false;
 };
 
 class StarExpr : public Expression
